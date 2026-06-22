@@ -82,41 +82,76 @@ export default function App() {
     onApply: () => void;
   } | null>(null);
 
-  // Load state on mount
-  useEffect(() => {
+  // Real-time server state sync states
+  const [syncEnabled, setSyncEnabled] = useState<boolean>(true);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const serverUpdateTimeRef = React.useRef<number>(0);
+  const isPostingRef = React.useRef<boolean>(false);
+
+  // Helper to post current state and sync to server
+  const postRostersAndGameState = async (g: GameState, r: { A: Player[]; B: Player[] }, currentPid: number) => {
+    if (isPostingRef.current || !syncEnabled) return;
     try {
-      // 1. Load Rosters
-      const savedRosters = localStorage.getItem(ROSTER_KEY);
-      let localPid = 1;
-      let initRosterNeeded = false;
-
-      if (savedRosters) {
-        const parsed = JSON.parse(savedRosters);
-        setRosters({
-          A: parsed.A || [],
-          B: parsed.B || []
-        });
-        localPid = parsed._pid || 1;
-        setPid(localPid);
+      isPostingRef.current = true;
+      setSyncStatus('syncing');
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameState: g,
+          rosters: r,
+          pid: currentPid
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        serverUpdateTimeRef.current = data.lastUpdateTime;
+        setSyncStatus('success');
       } else {
-        initRosterNeeded = true;
+        setSyncStatus('error');
       }
+    } catch (e) {
+      console.warn('Sync post failed:', e);
+      setSyncStatus('error');
+    } finally {
+      isPostingRef.current = false;
+    }
+  };
 
-      // 2. Load Game State
-      const savedGame = localStorage.getItem(SAVE_KEY);
-      if (savedGame) {
-        const parsed = JSON.parse(savedGame);
-        const mergedGame: GameState = {
-          ...parsed,
-          curPitcherA: parsed.curPitcherA || parsed.curPitcher || '',
-          curPitcherB: parsed.curPitcherB || '',
-          curPitcher: parsed.curPitcher || parsed.curPitcherA || ''
-        };
-        setGameState(mergedGame);
-        showToast('📂 이전 경기 진행 데이터가 로컬 공간으로부터 복구 완료되었습니다.');
-      } else {
-        if (initRosterNeeded) {
-          // Initialize mock players on first clean run
+  // Load state on mount plus synchronizer
+  useEffect(() => {
+    const initializeState = async () => {
+      try {
+        // 1. Initial local load fallbacks
+        const savedRosters = localStorage.getItem(ROSTER_KEY);
+        let localRosters = { A: [] as Player[], B: [] as Player[] };
+        let localPid = 1;
+        let initRosterNeeded = false;
+
+        if (savedRosters) {
+          const parsed = JSON.parse(savedRosters);
+          localRosters = {
+            A: parsed.A || [],
+            B: parsed.B || []
+          };
+          localPid = parsed._pid || 1;
+        } else {
+          initRosterNeeded = true;
+        }
+
+        let localGameState: GameState | null = null;
+        const savedGame = localStorage.getItem(SAVE_KEY);
+        if (savedGame) {
+          const parsed = JSON.parse(savedGame);
+          localGameState = {
+            ...parsed,
+            curPitcherA: parsed.curPitcherA || parsed.curPitcher || '',
+            curPitcherB: parsed.curPitcherB || '',
+            curPitcher: parsed.curPitcher || parsed.curPitcherA || ''
+          };
+        }
+
+        if (initRosterNeeded && !localGameState) {
           const pos = ['투수', '포수', '1루수', '2루수', '3루수', '유격수', '좌익수', '중견수', '우익수', '지명타자'];
           const tempA: Player[] = [];
           const tempB: Player[] = [];
@@ -129,28 +164,136 @@ export default function App() {
             tempB.push({ id: currentPid++, num: i + 1, name: `원정선수 ${i + 1}`, pos: pos[i], status: 'active' });
           }
 
-          setRosters({ A: tempA, B: tempB });
-          setPid(currentPid);
-          localStorage.setItem(ROSTER_KEY, JSON.stringify({ A: tempA, B: tempB, _pid: currentPid }));
+          localRosters = { A: tempA, B: tempB };
+          localPid = currentPid;
 
-          // Auto select first pitcher
           const firstA_pitcher = String(tempA[0].id);
           const firstB_pitcher = String(tempB[0].id);
           const nonPitcherB = tempB.filter(p => p.pos !== '투수');
           const firstB_batter = nonPitcherB.length > 0 ? String(nonPitcherB[0].id) : '';
 
-          updateGameState({
+          localGameState = {
+            scoreA: 0,
+            scoreB: 0,
+            inning: 1,
+            half: 'top',
+            balls: 0,
+            strikes: 0,
+            outs: 0,
+            bases: [false, false, false, false],
+            playLog: [],
+            inningScores: {},
+            curBatter: firstB_batter,
+            curPitcher: firstA_pitcher,
             curPitcherA: firstA_pitcher,
             curPitcherB: firstB_pitcher,
-            curPitcher: firstA_pitcher, // Team A pitches in top of space
-            curBatter: firstB_batter
-          });
+            teamA: '홈팀',
+            teamB: '원정팀',
+            memo: '',
+            kbo: {
+              offTimeUsed: 0,
+              moundVisitUsed: 0,
+              catcherMoundUsed: 0,
+              catcherMoundMax: 2,
+              ballChangeUsed: 0
+            },
+            subLog: []
+          };
+        }
+
+        // Try syncing with the server first
+        setSyncStatus('syncing');
+        const res = await fetch('/api/sync');
+        if (res.ok) {
+          const data = await res.json();
+          // If server already contains custom rosters, we pull from server.
+          // Otherwise, we populate local state, and then upload it to server!
+          if (data.rosters && (data.rosters.A.length > 0 || data.rosters.B.length > 0)) {
+            setGameState(data.gameState);
+            setRosters(data.rosters);
+            setPid(data.pid);
+            serverUpdateTimeRef.current = data.lastUpdateTime;
+            setSyncStatus('success');
+            showToast('📡 실시간 클라우드 명단이 연결 장치들과 즉시 동기화되었습니다!');
+          } else {
+            // Push local to server to synchronize starting defaults
+            if (localGameState) {
+              setGameState(localGameState);
+              setRosters(localRosters);
+              setPid(localPid);
+              // Store locally
+              localStorage.setItem(SAVE_KEY, JSON.stringify(localGameState));
+              localStorage.setItem(ROSTER_KEY, JSON.stringify({ ...localRosters, _pid: localPid }));
+              await postRostersAndGameState(localGameState, localRosters, localPid);
+            }
+          }
+        } else {
+          // offline fallback
+          if (localGameState) {
+            setGameState(localGameState);
+            setRosters(localRosters);
+            setPid(localPid);
+          }
+        }
+      } catch (e) {
+        console.warn('Initial server sync failed, falling back to offline mode:', e);
+        setSyncStatus('error');
+        // offline fallback load
+        try {
+          const savedRosters = localStorage.getItem(ROSTER_KEY);
+          if (savedRosters) {
+            const parsed = JSON.parse(savedRosters);
+            setRosters({ A: parsed.A || [], B: parsed.B || [] });
+            setPid(parsed._pid || 1);
+          }
+          const savedGame = localStorage.getItem(SAVE_KEY);
+          if (savedGame) {
+            setGameState(JSON.parse(savedGame));
+          }
+        } catch (eLocal) {
+          console.warn('Local read fail:', eLocal);
         }
       }
-    } catch (e) {
-      console.warn('Failed to load local storage state:', e);
-    }
+    };
+
+    initializeState();
   }, []);
+
+  // Background polling loop for active sync across other devices
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    const pollServer = async () => {
+      if (!syncEnabled || isPostingRef.current) return;
+      try {
+        const res = await fetch('/api/sync');
+        if (res.ok) {
+          const data = await res.json();
+          // Overwrite local if server's update timestamp is newer than our recorded one
+          if (data.lastUpdateTime > serverUpdateTimeRef.current) {
+            setGameState(data.gameState);
+            setRosters(data.rosters);
+            setPid(data.pid);
+            serverUpdateTimeRef.current = data.lastUpdateTime;
+            
+            // Also update localStorage so they are in sync
+            localStorage.setItem(SAVE_KEY, JSON.stringify(data.gameState));
+            localStorage.setItem(ROSTER_KEY, JSON.stringify({ ...data.rosters, _pid: data.pid }));
+            
+            setSyncStatus('success');
+          }
+        }
+      } catch (e) {
+        setSyncStatus('error');
+      }
+    };
+
+    if (syncEnabled) {
+      timer = setInterval(pollServer, 3000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [syncEnabled]);
 
   // Save changes automatically
   const saveState = (updatedGame: GameState) => {
@@ -165,6 +308,7 @@ export default function App() {
     setGameState((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
       saveState(next);
+      postRostersAndGameState(next, rosters, pid);
       return next;
     });
   };
@@ -195,6 +339,7 @@ export default function App() {
     setRosters((prev) => {
       const next = { ...prev, [team]: updated };
       localStorage.setItem(ROSTER_KEY, JSON.stringify({ ...next, _pid: pid }));
+      postRostersAndGameState(gameState, next, pid);
       return next;
     });
   };
@@ -202,6 +347,7 @@ export default function App() {
   const handleIncrementPid = () => {
     const nextPid = pid + 1;
     setPid(nextPid);
+    postRostersAndGameState(gameState, rosters, nextPid);
     return pid;
   };
 
@@ -1147,6 +1293,54 @@ ${subText}
         </div>
       </header>
 
+      {/* Dynamic Sync Status bar right under the header */}
+      <div className="bg-indigo-900/5 border-b border-indigo-150 py-2 px-4 shadow-inner-sm">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center gap-2 text-indigo-900 font-bold">
+            <span className={`w-2.5 h-2.5 rounded-full ${syncStatus === 'success' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : syncStatus === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'} shrink-0`} />
+            <span>
+              {syncStatus === 'success' && '✨ 실시간 기기 간 명단/스코인 클라우드 동기화 완료 (연결 완료)'}
+              {syncStatus === 'syncing' && '🔄 연결된 휴대폰/태블릿의 최신 명단과 즉시 연동 중...'}
+              {syncStatus === 'error' && '⚠️ 오프라인 모드 작동 중 (서버 대기 중)'}
+              {syncStatus === 'idle' && '💤 동기화 대기 중'}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 font-semibold text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={syncEnabled}
+                onChange={(e) => setSyncEnabled(e.target.checked)}
+                className="rounded text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 border-slate-300"
+              />
+              <span>실시간 동기화 활성화</span>
+            </label>
+            <button
+              onClick={async () => {
+                if (window.confirm("정말로 모든 장치의 명단과 게임 데이터를 초기값으로 리셋하시겠습니까?")) {
+                  try {
+                    const res = await fetch('/api/sync/reset', { method: 'POST' });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setGameState(data.gameState);
+                      setRosters(data.rosters);
+                      setPid(data.pid);
+                      serverUpdateTimeRef.current = data.lastUpdateTime;
+                      showToast('🔄 모든 연결 기기의 게임 및 명단 데이터가 전면 리셋 연동되었습니다.');
+                    }
+                  } catch (e) {
+                    showToast('서버 초기화 실패');
+                  }
+                }
+              }}
+              className="text-[10px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-bold px-2 py-0.5 rounded cursor-pointer"
+            >
+              전체 기기 연동 리셋
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Tabs Menu Navigation inside Max Grid */}
       <nav className="border-b border-slate-200 bg-white sticky top-0 z-40 shadow-sm">
         <div className="max-w-4xl mx-auto px-2 flex justify-start items-center overflow-x-auto scrollbar-none gap-1 py-1.5">
@@ -1498,6 +1692,103 @@ ${subText}
                     이닝 전광판 (LINE SCOREBOARD)
                   </h4>
                   <ScoreBoardGrid gameState={gameState} />
+                </div>
+
+                {/* 실시간 양팀 전체 명단 (LIVE LINEUPS) */}
+                <div className="space-y-2" id="live-lineups-view">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-mono flex items-center justify-between">
+                    <span>실시간 경기 출전 선수 명단 (LIVE LINEUPS & ROSTERS)</span>
+                    <span className="text-[10px] text-indigo-400 font-normal">상단의 개별 팀 탭에서 선수 정보 추가/수정이 가능합니다.</span>
+                  </h4>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 divide-y md:divide-y-0 md:divide-x divide-slate-100">
+                      {/* 홈팀 명단 */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                          <span className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
+                            🏠 {gameState.teamA} (홈) 명단
+                            <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-bold font-mono">
+                              {rosters.A.length}명
+                            </span>
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-medium">현재 라인업 활성 매칭</span>
+                        </div>
+                        {rosters.A.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-4 text-center">등록된 홈팀 선수가 없습니다.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            {rosters.A.map((p) => {
+                              const isActiveBatter = gameState.curBatter === String(p.id) && getBattingTeamKey() === 'A';
+                              const isActivePitcher = gameState.curPitcherA === String(p.id);
+                              let highlightBg = 'bg-slate-50/60 border-slate-100';
+                              if (isActiveBatter) highlightBg = 'bg-blue-50 border-blue-300 ring-2 ring-blue-500/10 font-bold scale-[1.02] shadow-sm';
+                              if (isActivePitcher) highlightBg = 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-500/10 font-bold scale-[1.02] shadow-sm';
+
+                              return (
+                                <div
+                                  key={p.id}
+                                  className={`flex items-center justify-between p-2 rounded-xl border transition-all ${highlightBg}`}
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0">#{p.num}</span>
+                                    <span className="truncate text-slate-800 font-bold text-ellipsis overflow-hidden whitespace-nowrap">{p.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span className="text-[9px] bg-slate-200/80 text-slate-600 px-1 py-0.5 rounded font-black font-mono">{p.pos}</span>
+                                    {isActiveBatter && <span className="text-[9px] bg-blue-600 text-white px-1 py-0.5 rounded font-black animate-pulse">타자</span>}
+                                    {isActivePitcher && <span className="text-[9px] bg-indigo-600 text-white px-1 py-0.5 rounded font-black animate-pulse">투수</span>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 원정팀 명단 */}
+                      <div className="space-y-3 pt-4 md:pt-0 md:pl-6">
+                        <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                          <span className="text-sm font-black text-rose-700 flex items-center gap-1.5">
+                            🚌 {gameState.teamB} (원정) 명단
+                            <span className="text-xs bg-rose-50 text-rose-650 px-2 py-0.5 rounded-full font-bold font-mono">
+                              {rosters.B.length}명
+                            </span>
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-medium">현재 라인업 활성 매칭</span>
+                        </div>
+                        {rosters.B.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-4 text-center">등록된 원정팀 선수가 없습니다.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            {rosters.B.map((p) => {
+                              const isActiveBatter = gameState.curBatter === String(p.id) && getBattingTeamKey() === 'B';
+                              const isActivePitcher = gameState.curPitcherB === String(p.id);
+                              let highlightBg = 'bg-slate-50/60 border-slate-100';
+                              if (isActiveBatter) highlightBg = 'bg-blue-50 border-blue-300 ring-2 ring-blue-500/10 font-bold scale-[1.02] shadow-sm';
+                              if (isActivePitcher) highlightBg = 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-500/10 font-bold scale-[1.02] shadow-sm';
+
+                              return (
+                                <div
+                                  key={p.id}
+                                  className={`flex items-center justify-between p-2 rounded-xl border transition-all ${highlightBg}`}
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0">#{p.num}</span>
+                                    <span className="truncate text-slate-800 font-bold text-ellipsis overflow-hidden whitespace-nowrap">{p.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span className="text-[9px] bg-slate-200/80 text-slate-600 px-1 py-0.5 rounded font-black font-mono">{p.pos}</span>
+                                    {isActiveBatter && <span className="text-[9px] bg-blue-600 text-white px-1 py-0.5 rounded font-black animate-pulse">타자</span>}
+                                    {isActivePitcher && <span className="text-[9px] bg-indigo-600 text-white px-1 py-0.5 rounded font-black animate-pulse">투수</span>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Pitch Play controls panel */}
