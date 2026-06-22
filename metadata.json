@@ -1,0 +1,6 @@
+{
+  "name": "야구 심판 스코어카드",
+  "description": "KBO 규정 추적 기능 및 ABS 자동 투구 판정을 제공하는 야구 심판용 스코어카드 프로그램입니다.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
