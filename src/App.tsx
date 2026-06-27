@@ -1724,9 +1724,9 @@ ${subText}
                   </div>
 
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                       투수 라인업 설정 (홈 / 원정 개별 지정)
-                    </label>
+                    </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {/* 홈팀 투수 */}
                       <div className={`p-3 rounded-xl border transition-all ${getPitchingTeamKey() === 'A' ? 'bg-indigo-50/50 border-indigo-200 ring-2 ring-indigo-500/20' : 'bg-slate-50/30 border-slate-150'}`}>
