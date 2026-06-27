@@ -1,15 +1,10 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import cors from "cors";
 
 dotenv.config();
-
-// Support ES modules __dirname replacement
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({
