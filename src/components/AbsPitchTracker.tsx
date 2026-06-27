@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, RefreshCw, Layers, CheckCircle2, Video, FastForward, Play, Pause, Sparkles, HelpCircle, Coins, Flame, Zap } from 'lucide-react';
 
+const getApiUrl = (path: string) => {
+  const host = window.location.hostname;
+  const isLocalOrCloudRun = host === 'localhost' || 
+                            host === '127.0.0.1' || 
+                            host.endsWith('.run.app');
+  // If hosted on GitHub Pages or custom domain, route API requests to our live Cloud Run container URL
+  const base = isLocalOrCloudRun ? '' : 'https://ais-pre-2mljdcdy7iopruotoxw6gh-607464111897.asia-northeast1.run.app';
+  return `${base}${path}`;
+};
+
 interface AbsPitchTrackerProps {
   onAddBall: () => void;
   onAddStrike: () => void;
@@ -306,7 +316,7 @@ export default function AbsPitchTracker({
         isStrike: lastRecord.isStrike
       } : null;
 
-      const response = await fetch('/api/gemini/judge', {
+      const response = await fetch(getApiUrl('/api/gemini/judge'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
