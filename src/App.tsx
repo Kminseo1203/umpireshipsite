@@ -82,6 +82,36 @@ export default function App() {
     onApply: () => void;
   } | null>(null);
 
+  // Google Auth User State
+  const [user, setUser] = useState<{ name: string; email: string; picture: string } | null>(() => {
+    try {
+      const stored = localStorage.getItem('baseball_umpire_user');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return null;
+  });
+
+  // Listen to OAuth success/failure messages from popup
+  useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+        return;
+      }
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        const u = event.data.user;
+        setUser(u);
+        localStorage.setItem('baseball_umpire_user', JSON.stringify(u));
+        showToast(`👋 ${u.name}님, 구글 로그인 성공!`);
+      } else if (event.data?.type === 'OAUTH_AUTH_FAILURE') {
+        showToast(`❌ 구글 로그인 실패: ${event.data.error || '알 수 없는 오류'}`);
+      }
+    };
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, []);
+
+
   // Real-time server state sync states
   const [syncEnabled, setSyncEnabled] = useState<boolean>(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
@@ -324,6 +354,118 @@ export default function App() {
       return () => clearTimeout(t);
     }
   }, [toast]);
+
+  const handleGoogleLogin = async () => {
+    try {
+      const res = await fetch('/api/auth/google/url');
+      const data = await res.json();
+      if (data.configured && data.url) {
+        const width = 500;
+        const height = 600;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
+        
+        // Clear old user first to guarantee difference detection
+        localStorage.removeItem('baseball_umpire_user');
+
+        const popup = window.open(
+          data.url,
+          'google_oauth_popup',
+          `width=${width},height=${height},left=${left},top=${top}`
+        );
+
+        if (!popup) {
+          showToast('⚠️ 팝업 차단기를 해제하고 다시 시도해 주세요.');
+          return;
+        }
+
+        // Active polling on localStorage to handle sandbox / cross-origin opener nullification
+        const pollInterval = setInterval(() => {
+          try {
+            const stored = localStorage.getItem('baseball_umpire_user');
+            if (stored) {
+              const u = JSON.parse(stored);
+              setUser(u);
+              clearInterval(pollInterval);
+              if (popup && !popup.closed) {
+                popup.close();
+              }
+            }
+          } catch (e) {}
+
+          if (!popup || popup.closed) {
+            clearInterval(pollInterval);
+          }
+        }, 800);
+      } else {
+        setModal({
+          title: 'Google OAuth 환경설정 가이드',
+          sub: '구글 로그인을 사용하기 위해 Google Cloud Console 설정이 필요합니다.',
+          onApply: () => {
+            const virtualUser = {
+              name: '체험용 구글러',
+              email: 'uyeon71@gmail.com',
+              picture: 'https://lh3.googleusercontent.com/a/default-user=s100'
+            };
+            setUser(virtualUser);
+            localStorage.setItem('baseball_umpire_user', JSON.stringify(virtualUser));
+            showToast('💡 가상 로그인 체험 모드가 활성화되었습니다!');
+            setModal(null);
+          },
+          content: (
+            <div className="space-y-4 text-xs text-slate-600 leading-relaxed max-h-[350px] overflow-y-auto pr-1">
+              <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl">
+                ⚠️ <strong>"Access blocked: This app's request is invalid" 오류 해결법:</strong><br/>
+                Google Cloud Console에서 <strong>승인된 자바스크립트 원본</strong>과 <strong>승인된 리디렉션 URI</strong>가 아래의 실제 호스팅 도메인 주소와 일치하도록 정확하게 등록되어야 합니다.
+              </div>
+
+              <div className="space-y-2">
+                <p className="font-semibold text-slate-800">1. 승인된 자바스크립트 원본 (Authorized JavaScript origins) 입력값</p>
+                <div className="bg-slate-100 p-2.5 rounded font-mono text-[10px] text-indigo-700 space-y-1 select-all">
+                  <div>https://ais-dev-2mljdcdy7iopruotoxw6gh-607464111897.asia-northeast1.run.app</div>
+                  <div>https://ais-pre-2mljdcdy7iopruotoxw6gh-607464111897.asia-northeast1.run.app</div>
+                  <div>{window.location.origin}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="font-semibold text-slate-800">2. 승인된 리디렉션 URI (Authorized redirect URIs) 입력값</p>
+                <div className="bg-slate-100 p-2.5 rounded font-mono text-[10px] text-indigo-700 space-y-1 select-all">
+                  <div>https://ais-dev-2mljdcdy7iopruotoxw6gh-607464111897.asia-northeast1.run.app/auth/callback</div>
+                  <div>https://ais-pre-2mljdcdy7iopruotoxw6gh-607464111897.asia-northeast1.run.app/auth/callback</div>
+                  <div>{data.redirectUri || `${window.location.origin}/auth/callback`}</div>
+                </div>
+              </div>
+
+              <p className="font-semibold text-slate-800">3. AI Studio Settings에 환경변수 추가</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>AI Studio 우측 상단 Settings(설정) 메뉴에서 아래 변수명으로 클라이언트 ID와 비밀번호를 기입해 주십시오:</li>
+                <li className="font-mono bg-slate-100 p-1 rounded text-[10px] text-indigo-700">
+                  GOOGLE_CLIENT_ID = [구글 클라이언트 ID]<br/>
+                  GOOGLE_CLIENT_SECRET = [구글 클라이언트 보안 비밀번호]
+                </li>
+              </ul>
+
+              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-800">
+                💡 <strong>가상 로그인 테스트:</strong><br/>
+                환경변수를 아직 등록하지 않았거나 설정 과정 중이라면, 아래의 <strong>[기입 확정]</strong>을 누르시면 가상 계정으로 체험하실 수 있습니다.
+              </div>
+            </div>
+          )
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('⚠️ 인증 서버 요청 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('baseball_umpire_user');
+    showToast('👋 안전하게 로그아웃 되었습니다.');
+  };
+
 
   // Utility helpers
   const getBattingTeamKey = () => (gameState.half === 'top' ? 'B' : 'A');
@@ -1179,6 +1321,10 @@ export default function App() {
   };
 
   const handleFullReset = () => {
+    if (user?.email !== 'kmimseo1203@gmail.com') {
+      showToast('🔒 경기 리셋 권한이 없습니다. 관리자 이메일(kmimseo1203@gmail.com)로 로그인이 필요합니다.');
+      return;
+    }
     if (!confirm('경기의 스코어 및 아웃카운트 데이터만 초기화합니다. 선수 등록 명단은 유지됩니다. 진행할까요?')) return;
     const defaultState: GameState = {
       scoreA: 0,
@@ -1287,9 +1433,39 @@ ${subText}
               </p>
             </div>
           </div>
-          <span className="text-[11px] font-semibold bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-slate-700">
-            공식 리그 룰셋 완비 포맷
-          </span>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <div className="flex items-center gap-2 bg-slate-800 border border-slate-700/85 px-3 py-1.5 rounded-full text-xs" id="auth-profile">
+                {user.picture ? (
+                  <img src={user.picture} alt={user.name} className="w-5 h-5 rounded-full border border-white/20 shrink-0" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-bold text-white shrink-0">G</div>
+                )}
+                <span className="text-slate-200 font-bold max-w-[80px] truncate" title={user.email}>{user.name}</span>
+                <button
+                  onClick={handleLogout}
+                  className="text-[10px] text-slate-400 hover:text-rose-400 font-bold pl-2 border-l border-slate-700 transition-colors cursor-pointer"
+                  id="btn-logout"
+                >
+                  로그아웃
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleGoogleLogin}
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-full border border-indigo-500 shadow-md transition-all active:scale-95 cursor-pointer"
+                id="btn-google-login"
+              >
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M12.24 10.285V14.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.859-3.578-7.859-8s3.53-8 7.859-8c2.46 0 4.105 1.025 5.047 1.926l3.227-3.227C18.251 1.637 15.485 1 12.24 1c-6.075 0-11 4.925-11 11s4.925 11 11 11c6.34 0 10.564-4.453 10.564-10.75 0-.724-.078-1.275-.172-1.825H12.24z" />
+                </svg>
+                구글 로그인
+              </button>
+            )}
+            <span className="text-[11px] font-semibold bg-slate-800 text-slate-300 px-3 py-1.5 rounded-full border border-slate-700">
+              공식 리그 룰셋 완비 포맷
+            </span>
+          </div>
         </div>
       </header>
 
@@ -1317,6 +1493,10 @@ ${subText}
             </label>
             <button
               onClick={async () => {
+                if (user?.email !== 'kmimseo1203@gmail.com') {
+                  showToast('🔒 전체 기기 연동 리셋 권한이 없습니다. 관리자 이메일(kmimseo1203@gmail.com)로 로그인이 필요합니다.');
+                  return;
+                }
                 if (window.confirm("정말로 모든 장치의 명단과 게임 데이터를 초기값으로 리셋하시겠습니까?")) {
                   try {
                     const res = await fetch('/api/sync/reset', { method: 'POST' });
@@ -2008,6 +2188,7 @@ ${subText}
                 onPlayersChange={(updated) => handlePlayersChange(currentTab === 'rosterA' ? 'A' : 'B', updated)}
                 showToast={showToast}
                 onRequestIncrementPid={handleIncrementPid}
+                isAdmin={user?.email === 'kmimseo1203@gmail.com'}
               />
             )}
 
@@ -2061,15 +2242,36 @@ ${subText}
             )}
 
             {/* TAB 6: ABS Camera pitch detector program */}
-            {currentTab === 'abs' && (
-              <AbsPitchTracker
-                onAddBall={addBall}
-                onAddStrike={addStrike}
-                showToast={showToast}
-                balls={gameState.balls}
-                strikes={gameState.strikes}
-              />
-            )}
+            {currentTab === 'abs' && (() => {
+              const getActiveBatterName = () => {
+                const key = gameState.half === 'top' ? 'B' : 'A';
+                const list = rosters[key] || [];
+                const found = list.find((p: any) => String(p.id) === gameState.curBatter);
+                return found ? found.name : '';
+              };
+
+              const getActivePitcherName = () => {
+                const pitchingKey = gameState.half === 'top' ? 'A' : 'B';
+                const list = rosters[pitchingKey] || [];
+                const activePitcherId = pitchingKey === 'A' ? gameState.curPitcherA : gameState.curPitcherB;
+                const found = list.find((p: any) => String(p.id) === activePitcherId);
+                return found ? found.name : '';
+              };
+
+              return (
+                <AbsPitchTracker
+                  onAddBall={addBall}
+                  onAddStrike={addStrike}
+                  showToast={showToast}
+                  balls={gameState.balls}
+                  strikes={gameState.strikes}
+                  gameState={gameState}
+                  rosters={rosters}
+                  batterName={getActiveBatterName()}
+                  pitcherName={getActivePitcherName()}
+                />
+              );
+            })()}
           </motion.div>
         </AnimatePresence>
       </main>

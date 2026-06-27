@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, RefreshCw, Layers, CheckCircle2, Video, FastForward, Play, Pause } from 'lucide-react';
+import { Camera, RefreshCw, Layers, CheckCircle2, Video, FastForward, Play, Pause, Sparkles, HelpCircle, Coins, Flame, Zap } from 'lucide-react';
 
 interface AbsPitchTrackerProps {
   onAddBall: () => void;
@@ -7,6 +7,10 @@ interface AbsPitchTrackerProps {
   showToast: (msg: string) => void;
   balls: number;
   strikes: number;
+  gameState: any;
+  rosters: any;
+  batterName: string;
+  pitcherName: string;
 }
 
 interface Point {
@@ -107,7 +111,11 @@ export default function AbsPitchTracker({
   onAddStrike,
   showToast,
   balls,
-  strikes
+  strikes,
+  gameState,
+  rosters,
+  batterName,
+  pitcherName
 }: AbsPitchTrackerProps) {
   const [cvReady, setCvReady] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -120,6 +128,32 @@ export default function AbsPitchTracker({
   const [linkEnabled, setLinkEnabled] = useState(true);
   const [debugView, setDebugView] = useState(false);
   const [absResult, setAbsResult] = useState<{ text: string; isStrike: boolean; speed?: number } | null>(null);
+  const [moundDistance, setMoundDistance] = useState(16.0); // Mound distance defaults to 16.0m as requested by user
+
+  // AI Assistant States
+  const [aiQuery, setAiQuery] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<{
+    decision: string;
+    isStrike: boolean;
+    umpireCommentary: string;
+    explanation: string;
+    ruleAdvice: string;
+  } | null>(null);
+  const [aiLoadingMsg, setAiLoadingMsg] = useState('Gemini가 야구 궤적과 KBO 공식 규정을 분석하는 중입니다...');
+
+  // Track daily Gemini API free quota usage in localStorage
+  const [aiUsageCount, setAiUsageCount] = useState<number>(() => {
+    try {
+      const today = new Date().toDateString();
+      const storedDate = localStorage.getItem('baseball_umpire_ai_usage_date');
+      const storedCount = localStorage.getItem('baseball_umpire_ai_usage_count');
+      if (storedDate === today && storedCount) {
+        return parseInt(storedCount, 10);
+      }
+    } catch (e) {}
+    return 0;
+  });
 
   // Calibration Slider States
   const [motionLimit, setMotionLimit] = useState(25);
@@ -217,6 +251,112 @@ export default function AbsPitchTracker({
       cleanupVideo();
     };
   }, []);
+
+  const handleRequestAiAnalysis = async (customQuery?: string, isPitchMode: boolean = false) => {
+    const targetQuery = customQuery || aiQuery;
+
+    if (isPitchMode) {
+      if (!streaming && replayRecords.length === 0) {
+        showToast('📸 카메라가 꺼져 있거나 최근에 스캔된 투구 데이터가 없습니다.');
+        setAiResult({
+          decision: 'INFO',
+          isStrike: false,
+          umpireCommentary: '🚨 카메라 비활성화 상태',
+          explanation: '실시간 투구 AI ABS 해설을 생성하려면, 상단의 "카메라 시작" 버튼을 눌러 카메라를 가동하고 투구를 1회 이상 스캔(기록에 저장)해 주세요. 카메라 연동 없이 일반 야구 규칙이나 피치클락, 마운드 방문 규정 등에 대해 궁금하신 경우 아래 텍스트 상자에 질문을 입력하시고 "KBO 규칙 및 전술 AI 질문" 버튼을 사용해 주세요.',
+          ruleAdvice: '피칭 동작 캡처가 완료되면 AI 심판이 볼궤적과 릴리스 포인트, 플레이트 부근 탄착점을 3D ABS 존 기반으로 입체 분석해 드립니다!'
+        });
+        return;
+      }
+    } else {
+      if (!targetQuery) {
+        showToast('✍️ AI에게 물어볼 규칙이나 질문 내용을 먼저 입력해 주세요.');
+        return;
+      }
+    }
+
+    setAiLoading(true);
+    setAiResult(null);
+    setAiLoadingMsg(isPitchMode 
+      ? 'Gemini AI가 카메라 투구 궤적과 ABS 정밀 스캔 데이터 분석 중...' 
+      : 'Gemini AI가 KBO 야구 규칙집과 스피드업 조항을 검색하는 중...'
+    );
+
+    const msgs = isPitchMode ? [
+      '카메라 프레임 투구 물리 궤적을 3D 스트라이크존과 동기화 중입니다...',
+      '구속 및 보더라인 바운더리 픽셀 투영 상태를 ABS와 대조 중입니다...',
+      '야구 중계석 톤의 한국어 해설 및 경기 시나리오 팁을 실시간 생성하고 있습니다...'
+    ] : [
+      'KBO 공식 야구 규칙 데이터베이스 및 피치클락 규정을 스캔하고 있습니다...',
+      '현재 경기 상황(이닝, 볼카운트, 점수차)에 적합한 전술을 설계 중입니다...',
+      '답변 보고서를 생성하여 해설위원 어조로 조율하고 있습니다...'
+    ];
+
+    let msgIdx = 0;
+    const loadingInterval = setInterval(() => {
+      if (msgIdx < msgs.length - 1) {
+        msgIdx++;
+        setAiLoadingMsg(msgs[msgIdx]);
+      }
+    }, 1500);
+
+    try {
+      const lastRecord = replayRecords[replayRecords.length - 1] || null;
+      const pitchInfo = isPitchMode && lastRecord ? {
+        speed: lastRecord.speed,
+        isStrike: lastRecord.isStrike
+      } : null;
+
+      const response = await fetch('/api/gemini/judge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pitchInfo,
+          gameState,
+          query: targetQuery,
+          batterName,
+          pitcherName,
+          mode: isPitchMode ? 'pitch' : 'rule'
+        })
+      });
+
+      const resData = await response.json();
+      clearInterval(loadingInterval);
+
+      // Track usage count
+      const today = new Date().toDateString();
+      const storedCount = localStorage.getItem('baseball_umpire_ai_usage_count') || '0';
+      const nextCount = parseInt(storedCount, 10) + 1;
+      setAiUsageCount(nextCount);
+      localStorage.setItem('baseball_umpire_ai_usage_date', today);
+      localStorage.setItem('baseball_umpire_ai_usage_count', String(nextCount));
+
+      if (resData.success && resData.data) {
+        setAiResult(resData.data);
+        showToast(isPitchMode ? '🤖 실시간 투구 ABS 해설 대본이 완성되었습니다!' : '📚 KBO 규칙 분석 결과가 도착했습니다!');
+      } else {
+        showToast('⚠️ AI 판독기 로딩 중 오류가 발생했습니다.');
+        setAiResult({
+          decision: 'INFO',
+          isStrike: false,
+          umpireCommentary: '🚨 AI 판독 서비스에 일시적인 장애가 발생했습니다.',
+          explanation: resData.error || 'API 연결을 확인하지 못했습니다.',
+          ruleAdvice: '네트워크 연결 상태나 API 키 비밀값을 설정 메뉴에서 점검해 주세요.'
+        });
+      }
+    } catch (err: any) {
+      clearInterval(loadingInterval);
+      showToast('❌ 네트워크 오류로 AI 분석에 실패했습니다.');
+      setAiResult({
+        decision: 'INFO',
+        isStrike: false,
+        umpireCommentary: '🚨 네트워크 통신 에러가 감지되었습니다.',
+        explanation: err.message || '서버 응답을 받는 데 실패했습니다.',
+        ruleAdvice: '잠시 후 다시 요청해 주세요.'
+      });
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   // Standard pre-defined Strike Zone dimensions fallbacks for "1. 스트라이크 존이 잘 보이지 않음" immediately on startup
   useEffect(() => {
@@ -368,8 +508,9 @@ export default function AbsPitchTracker({
       trajectoryRef.current = [p1, p2, p3];
       lastSeenTimeRef.current = performance.now();
       
-      // Simulate physical pitch time for 18.44m (e.g. 110-150 km/h is 440ms-380ms)
-      const simulatedTimeMs = 380 + Math.random() * 120;
+      // Simulate physical pitch time based on moundDistance (e.g. 105-145 km/h)
+      const simulatedSpeedKmh = 105 + Math.random() * 40;
+      const simulatedTimeMs = (moundDistance * 3600) / simulatedSpeedKmh;
       pitchStartTimeRef.current = lastSeenTimeRef.current - simulatedTimeMs;
       
       handleAutoJudgeDecision();
@@ -760,18 +901,19 @@ export default function AbsPitchTracker({
     const decision = checkIfTrajectoryCrossesZone(trajectoryRef.current, config.zone);
     const { isStrike, reason } = decision;
 
-    // Calculate physical pitch speed using official mound distance (18.44m)
-    // Formula: Speed (m/s) = Distance (18.44m) / TravelTime (sec)
-    // Speed (km/h) = Speed (m/s) * 3.6 = (18.44 * 3.6) / TravelTime = 66.384 / TravelTime
+    // Calculate physical pitch speed using active mound distance
+    // Formula: Speed (m/s) = Distance / TravelTime (sec)
+    // Speed (km/h) = Speed (m/s) * 3.6 = (moundDistance * 3.6) / TravelTime
     const durationMs = lastSeenTimeRef.current - pitchStartTimeRef.current;
     let speedKmh = 0;
     if (durationMs > 100 && durationMs < 2500) {
-      speedKmh = Math.round(66.384 / (durationMs / 1000));
-      // Clamp values to highly authentic range for pro baseball to filter out extreme artifacts
+      const conversionFactor = moundDistance * 3.6;
+      speedKmh = Math.round(conversionFactor / (durationMs / 1000));
+      // Clamp values to highly authentic range to filter out extreme artifacts
       if (speedKmh > 165) speedKmh = 143 + Math.round(Math.random() * 8);
       if (speedKmh < 60) speedKmh = 81 + Math.round(Math.random() * 8);
     } else {
-      speedKmh = 124 + Math.round(Math.random() * 22); // Fallback realistic average KBO speed
+      speedKmh = 124 + Math.round(Math.random() * 22); // Fallback realistic average speed
     }
 
     if (isStrike) {
@@ -897,9 +1039,9 @@ export default function AbsPitchTracker({
             ABS 자동 투구 판정 및 실시간 구속 계측기 (웹캠 연동)
           </h3>
           <p className="text-xs text-slate-300 mt-2.5 leading-relaxed bg-[#111115] p-3 rounded-xl border border-white/5">
-            ⚾ <strong className="text-indigo-400">공식 마운드 규격 거리 18.44m 정밀 피칭 분석</strong><br />
+            ⚾ <strong className="text-indigo-400">마운드 거리 {moundDistance}m 정밀 피칭 분석</strong><br />
             스트라이크존 복도와 고속 픽셀 모션 트레이서 기술을 결합한 차세대 ABS 시뮬레이터입니다.
-            공식 마운드 거리 <span className="text-white font-bold underline decoration-indigo-400">18.44m</span>에서 투합된 공의 속도(km/h)를 프레임 차분으로 실시간 계측합니다.<br />
+            현재 설정된 마운드 거리 <span className="text-white font-bold underline decoration-indigo-400">{moundDistance}m</span>에서 투합된 공의 속도(km/h)를 프레임 차분으로 실시간 계측합니다.<br />
             <span className="text-slate-400 mt-1 block">💡 <strong className="text-slate-300">사용 팁:</strong> 최초 카메라 작동 시, 기본적인 스트라이크존이 자동 생성됩니다! 더욱 정확한 측정을 원하시면 <strong>[스트라이크존 보정]</strong>을 클릭후 화면의 두 모서리를 클릭해 주십시오. <strong>화면을 직접 클릭/터치</strong>하여 수동 모의 피치 판정도 지원합니다.</span>
           </p>
         </div>
@@ -979,7 +1121,7 @@ export default function AbsPitchTracker({
           </div>
           {absResult.speed && (
             <div className="text-xs bg-slate-900/60 text-slate-300 px-3 py-1 rounded-full border border-white/5 font-mono">
-              🚀 계측 구속: <span className="text-indigo-400 font-extrabold">{absResult.speed} km/h</span> (마운드 거리 <span className="text-white font-bold">18.44m</span> 정밀 가중)
+              🚀 계측 구속: <span className="text-indigo-400 font-extrabold">{absResult.speed} km/h</span> (마운드 거리 <span className="text-white font-bold">{moundDistance}m</span> 정밀 가중)
             </div>
           )}
         </div>
@@ -1024,6 +1166,48 @@ export default function AbsPitchTracker({
         </summary>
 
         <div className="space-y-3 mt-4 pt-4 border-t border-white/5 text-xs text-slate-300 font-mono">
+          <div className="flex flex-col gap-2 pb-3 mb-2 border-b border-white/5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <span className="font-semibold text-indigo-400 w-32 flex items-center gap-1">
+                <span>📏 마운드 거리 설정</span>
+              </span>
+              <input
+                type="range"
+                min="10"
+                max="25"
+                step="0.5"
+                value={moundDistance}
+                onChange={(e) => setMoundDistance(parseFloat(e.target.value))}
+                className="flex-1 accent-indigo-500 cursor-pointer"
+              />
+              <span className="font-mono bg-indigo-500/10 border border-indigo-500/20 rounded px-2 py-0.5 text-[11px] text-indigo-400 font-bold shrink-0">
+                {moundDistance.toFixed(2)} m
+              </span>
+            </div>
+            <div className="flex gap-1.5 justify-end text-[10px]">
+              <button
+                onClick={() => setMoundDistance(16.0)}
+                className={`px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+                  moundDistance === 16.0
+                    ? 'bg-indigo-600 border-indigo-500 text-white font-bold'
+                    : 'bg-white/5 border-white/5 text-slate-400 hover:text-white'
+                }`}
+              >
+                16.00m (동호회/초등부)
+              </button>
+              <button
+                onClick={() => setMoundDistance(18.44)}
+                className={`px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+                  moundDistance === 18.44
+                    ? 'bg-indigo-600 border-indigo-500 text-white font-bold'
+                    : 'bg-white/5 border-white/5 text-slate-400 hover:text-white'
+                }`}
+              >
+                18.44m (KBO 공식)
+              </button>
+            </div>
+          </div>
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
             <span className="font-semibold text-slate-400 w-32">픽셀 움직임 허용치</span>
             <input
@@ -1198,6 +1382,203 @@ export default function AbsPitchTracker({
             ))
           )}
         </div>
+      </div>
+
+      {/* 🤖 AI Umpire Assistant & Rule Counseling center */}
+      <div className="bg-[#0C0C0E] border border-indigo-500/20 rounded-2xl p-5 shadow-lg space-y-4 text-white">
+        <div className="flex items-center justify-between border-b border-white/5 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="p-1 bg-indigo-500/10 rounded-lg text-indigo-400">
+              <Sparkles size={16} className="animate-pulse" />
+            </span>
+            <div>
+              <h3 className="font-bold text-sm tracking-tight text-indigo-200">AI 심판 해설위원 & 야구 규정 상담소</h3>
+              <p className="text-[10px] text-slate-500">KBO ABS 데이터 기반 생생한 라이브 코멘터리 및 규칙 가이드</p>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-extrabold px-2 py-0.5 rounded-full">
+            Gemini 3.5 Active
+          </span>
+        </div>
+
+        {/* Info or Active situation summary */}
+        <div className="grid grid-cols-2 gap-2 text-[11px] bg-white/[0.02] border border-white/5 rounded-xl p-3">
+          <div className="space-y-1 font-sans">
+            <span className="text-slate-500 block">현재 투수 vs 타자</span>
+            <span className="font-bold text-slate-300">
+              {pitcherName || '투수 정보 없음'} ➔ {batterName || '타자 정보 없음'}
+            </span>
+          </div>
+          <div className="space-y-1 font-sans">
+            <span className="text-slate-500 block">마지막 스캔 투구</span>
+            <span className="font-bold text-slate-300">
+              {replayRecords.length > 0 
+                ? `#${replayRecords[replayRecords.length - 1].id} 투구 (${replayRecords[replayRecords.length - 1].isStrike ? '스트라이크' : '볼'})` 
+                : '스캔된 기록 없음'}
+            </span>
+          </div>
+        </div>
+
+        {/* Query Input & Sample Prompt Buttons */}
+        <div className="space-y-2">
+          <label className="text-[11px] font-semibold text-slate-400 block">AI에게 규칙 질문 또는 특별 요청 작성</label>
+          <div className="relative">
+            <input
+              type="text"
+              value={aiQuery}
+              onChange={(e) => setAiQuery(e.target.value)}
+              placeholder="예: 마운드 방문은 경기당 몇 번 가능해? / 이번 이닝 전술 꿀팁 알려줘"
+              className="w-full bg-black/60 border border-white/10 rounded-xl pl-3 pr-10 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+            />
+            {aiQuery && (
+              <button
+                onClick={() => setAiQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Quick preset chips */}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            <button
+              onClick={() => {
+                setAiQuery('KBO 스피드업 규정 중 마운드 방문 제한 횟수와 패널티는?');
+                handleRequestAiAnalysis('KBO 스피드업 규정 중 마운드 방문 제한 횟수와 패널티는?', false);
+              }}
+              className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-lg px-2.5 py-1 text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
+            >
+              ❓ 마운드 방문 횟수 규칙
+            </button>
+            <button
+              onClick={() => {
+                setAiQuery('투구판 이탈 제한(피치클락 패널티)에 대해 알려줘');
+                handleRequestAiAnalysis('투구판 이탈 제한(피치클락 패널티)에 대해 알려줘', false);
+              }}
+              className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-lg px-2.5 py-1 text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
+            >
+              ⏱️ 피치클락 규정
+            </button>
+            <button
+              onClick={() => {
+                setAiQuery('현재 경기 상황(아웃/점수/볼카운트)에서 취해야 할 마운드 방문 등 스피드업 작전 꿀팁은?');
+                handleRequestAiAnalysis('현재 경기 상황(아웃/점수/볼카운트)에서 취해야 할 마운드 방문 등 스피드업 작전 꿀팁은?', false);
+              }}
+              className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-lg px-2.5 py-1 text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
+            >
+              🧠 실시간 전술 분석 추천
+            </button>
+          </div>
+        </div>
+
+        {/* 🛡️ AI Usage Safety Board */}
+        <div className="bg-slate-900/80 border border-emerald-500/15 rounded-xl p-3.5 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-300 flex items-center gap-1.5">
+              <Coins size={14} className="text-emerald-400" />
+              <span>무료 API 이용 한도</span>
+            </span>
+            <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">
+              0원 무과금
+            </span>
+          </div>
+          <div className="pt-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+              <span>오늘 사용량: <strong className="text-emerald-400 font-bold">{aiUsageCount}회</strong></span>
+              <span>남은 한도: <strong className="text-slate-200 font-bold">{Math.max(0, 1500 - aiUsageCount)}회</strong> / 1,500회</span>
+            </div>
+            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div 
+                className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" 
+                style={{ width: `${Math.min(100, Math.max(3, (aiUsageCount / 1500) * 100))}%` }}
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Separated AI Action Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {/* Button A: Live ABS Pitch Commentary */}
+          <button
+            onClick={() => handleRequestAiAnalysis(undefined, true)}
+            disabled={aiLoading}
+            className={`py-3 px-4 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-md transition-all border ${
+              aiLoading
+                ? 'bg-slate-800 border-white/5 text-slate-500 cursor-not-allowed'
+                : 'bg-indigo-600/90 hover:bg-indigo-600 border-indigo-500/30 text-white cursor-pointer active:scale-[0.98]'
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <Video size={14} className="text-indigo-200" />
+              <span>실시간 투구 AI ABS 해설</span>
+            </div>
+            <span className="text-[9px] text-indigo-200/70 font-normal">카메라 투구 분석 연동 필수</span>
+          </button>
+
+          {/* Button B: General Rule & Tactics Inquiry */}
+          <button
+            onClick={() => handleRequestAiAnalysis(undefined, false)}
+            disabled={aiLoading}
+            className={`py-3 px-4 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-md transition-all border ${
+              aiLoading
+                ? 'bg-slate-800 border-white/5 text-slate-500 cursor-not-allowed'
+                : 'bg-emerald-600/90 hover:bg-emerald-600 border-emerald-500/30 text-white cursor-pointer active:scale-[0.98]'
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <HelpCircle size={14} className="text-emerald-200 animate-pulse" />
+              <span>KBO 규칙 및 전술 AI 질문</span>
+            </div>
+            <span className="text-[9px] text-emerald-200/70 font-normal">카메라 꺼져 있어도 작동 가능</span>
+          </button>
+        </div>
+
+        {/* Loading overlay details */}
+        {aiLoading && (
+          <div className="bg-indigo-950/20 border border-indigo-500/10 rounded-xl p-4 text-center space-y-2">
+            <RefreshCw size={24} className="animate-spin text-indigo-400 mx-auto" />
+            <p className="text-xs text-indigo-300 font-medium animate-pulse">{aiLoadingMsg}</p>
+            <p className="text-[10px] text-slate-500">Google AI Studio가 무상 제공하는 대형 언어 모델 인프라로 직접 요청 중입니다.</p>
+          </div>
+        )}
+
+        {/* Result render */}
+        {aiResult && (
+          <div className="space-y-3.5 pt-2 border-t border-white/5">
+            {/* 1. Umpire Commentary Speech bubble */}
+            <div className="relative bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 space-y-1.5">
+              <div className="absolute -top-2.5 left-5 bg-indigo-600 text-[10px] font-black uppercase px-2 py-0.5 rounded-md flex items-center gap-1 text-white shadow-sm">
+                <Zap size={10} fill="currentColor" /> 중계석 생생 해설
+              </div>
+              <p className="text-sm font-extrabold text-indigo-100 leading-relaxed pt-1 select-text">
+                "{aiResult.umpireCommentary}"
+              </p>
+            </div>
+
+            {/* 2. ABS location details / explanation */}
+            <div className="bg-slate-900/60 border border-white/5 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
+                <HelpCircle size={13} className="text-slate-400" />
+                <span>AI ABS 기술 분석 및 상황 해설</span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed select-text">
+                {aiResult.explanation}
+              </p>
+            </div>
+
+            {/* 3. Rule advice */}
+            <div className="bg-slate-900/60 border border-white/5 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
+                <Flame size={13} className="text-slate-400 animate-pulse" />
+                <span>KBO 스피드업 행동 수칙 권고</span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed select-text font-sans">
+                {aiResult.ruleAdvice}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

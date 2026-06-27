@@ -9,6 +9,7 @@ interface RosterManagerProps {
   onPlayersChange: (updated: Player[]) => void;
   showToast: (msg: string) => void;
   onRequestIncrementPid: () => number;
+  isAdmin: boolean;
 }
 
 const POSITIONS = ['투수', '포수', '1루수', '2루수', '3루수', '유격수', '좌익수', '중견수', '우익수', '지명타자'];
@@ -27,14 +28,24 @@ export default function RosterManager({
   players,
   onPlayersChange,
   showToast,
-  onRequestIncrementPid
+  onRequestIncrementPid,
+  isAdmin
 }: RosterManagerProps) {
   const [newNum, setNewNum] = useState<string>('');
   const [newName, setNewName] = useState<string>('');
   const [newPos, setNewPos] = useState<string>('투수');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const checkAdmin = () => {
+    if (!isAdmin) {
+      showToast('🔒 관리자 권한이 필요합니다. 관리자 이메일(kmimseo1203@gmail.com)로 로그인을 진행해 주십시오.');
+      return false;
+    }
+    return true;
+  };
+
   const handleAddPlayer = () => {
+    if (!checkAdmin()) return;
     const numVal = parseInt(newNum) || players.length + 1;
     const nameVal = newName.trim() || `선수 ${players.length + 1}`;
 
@@ -53,12 +64,14 @@ export default function RosterManager({
   };
 
   const handleRemovePlayer = (id: number, name: string) => {
+    if (!checkAdmin()) return;
     if (!confirm(`선수 [${name}] 명단을 삭제하시겠습니까?`)) return;
     onPlayersChange(players.filter((p) => p.id !== id));
     showToast(`🗑️ ${name} 선수가 명단에서 삭제되었습니다.`);
   };
 
   const handleUpdatePlayerName = (id: number, name: string) => {
+    if (!checkAdmin()) return;
     if (!name.trim()) return;
     onPlayersChange(
       players.map((p) => (p.id === id ? { ...p, name: name.trim() } : p))
@@ -66,12 +79,14 @@ export default function RosterManager({
   };
 
   const handleUpdatePlayerPos = (id: number, pos: string) => {
+    if (!checkAdmin()) return;
     onPlayersChange(
       players.map((p) => (p.id === id ? { ...p, pos } : p))
     );
   };
 
   const handleToggleBench = (id: number) => {
+    if (!checkAdmin()) return;
     onPlayersChange(
       players.map((p) => {
         if (p.id === id) {
@@ -85,6 +100,7 @@ export default function RosterManager({
   };
 
   const handleClearRoster = () => {
+    if (!checkAdmin()) return;
     if (!confirm(`${teamName}의 모든 선수 명단을 완전히 초기화할까요?`)) return;
     onPlayersChange([]);
     showToast(`🗑️ ${teamName} 명단이 전체 초기화되었습니다.`);
@@ -109,6 +125,7 @@ export default function RosterManager({
   };
 
   const handleImportRoster = (files: FileList | null) => {
+    if (!checkAdmin()) return;
     if (!files || files.length === 0) return;
     const file = files[0];
     const reader = new FileReader();
@@ -149,9 +166,18 @@ export default function RosterManager({
 
   return (
     <div className="space-y-4" id="roster-manager">
+      {!isAdmin && (
+        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 p-3.5 rounded-2xl text-xs flex items-center gap-2 font-semibold">
+          <span>🔒 현재 게스트 모드입니다. 선수 추가, 정보 수정 및 전체 명단 초기화 권한은 관리자 계정(<strong>kmimseo1203@gmail.com</strong>)으로 로그인 시에만 활성화됩니다.</span>
+        </div>
+      )}
+
       <div className="bg-[#0C0C0E] border border-white/10 rounded-2xl p-5 shadow-[0_0_15px_rgba(79,70,229,0.05)] space-y-4">
         <div>
-          <h3 className="font-bold text-white text-sm">신규 선수 추가</h3>
+          <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+            <span>신규 선수 추가</span>
+            {!isAdmin && <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-bold">권한 필요</span>}
+          </h3>
           <p className="text-xs text-slate-500 mt-1">
             등록된 양식에 맞춰 번호, 성명, 수비 포지션을 기입하여 추가하세요.
           </p>
@@ -163,7 +189,8 @@ export default function RosterManager({
             placeholder="번호"
             value={newNum}
             onChange={(e) => setNewNum(e.target.value)}
-            className="w-full sm:w-16 bg-[#080809] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/55 placeholder:text-slate-600 font-mono"
+            disabled={!isAdmin}
+            className={`w-full sm:w-16 bg-[#080809] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/55 placeholder:text-slate-600 font-mono ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
             min="1"
             max="99"
           />
@@ -172,12 +199,14 @@ export default function RosterManager({
             placeholder="선수 성명"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            className="flex-1 bg-[#080809] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/55 placeholder:text-slate-600"
+            disabled={!isAdmin}
+            className={`flex-1 bg-[#080809] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/55 placeholder:text-slate-600 ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
           />
           <select
             value={newPos}
             onChange={(e) => setNewPos(e.target.value)}
-            className="w-full sm:w-28 bg-[#080809] border border-white/10 text-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500/55 font-semibold"
+            disabled={!isAdmin}
+            className={`w-full sm:w-28 bg-[#080809] border border-white/10 text-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500/55 font-semibold ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             {POSITIONS.map((pos) => (
               <option key={pos} value={pos} className="bg-[#0c0c0e] text-white">
@@ -187,7 +216,8 @@ export default function RosterManager({
           </select>
           <button
             onClick={handleAddPlayer}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-4 py-2 text-sm font-bold flex items-center justify-center gap-1.5 transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] w-full sm:w-auto shrink-0 cursor-pointer"
+            disabled={!isAdmin}
+            className={`bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-4 py-2 text-sm font-bold flex items-center justify-center gap-1.5 transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] w-full sm:w-auto shrink-0 cursor-pointer ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             <Plus size={16} /> 등록
           </button>
@@ -200,7 +230,7 @@ export default function RosterManager({
             라인업 명단 ({players.length}명)
           </h4>
           <span className="text-[11px] text-indigo-400 font-bold">
-            ✓ 수비 포지션과 이름은 리스트 상에서 직접 수정할 수 있습니다.
+            {isAdmin ? '✓ 수비 포지션과 이름은 리스트 상에서 직접 수정할 수 있습니다.' : '🔒 조회 전용 (수정하려면 kmimseo1203@gmail.com 로그인이 필요합니다)'}
           </span>
         </div>
 
@@ -229,14 +259,16 @@ export default function RosterManager({
                     type="text"
                     value={p.name}
                     onChange={(e) => handleUpdatePlayerName(p.id, e.target.value)}
-                    className="flex-1 bg-transparent font-medium text-white border-b border-transparent focus:border-indigo-500/50 focus:bg-white/5 focus:outline-none py-0.5 px-2 text-sm rounded transition-all"
+                    readOnly={!isAdmin}
+                    className={`flex-1 bg-transparent font-medium text-white border-b border-transparent focus:border-indigo-500/50 focus:bg-white/5 focus:outline-none py-0.5 px-2 text-sm rounded transition-all ${!isAdmin ? 'cursor-not-allowed' : ''}`}
                   />
 
                   {/* Pos selector */}
                   <select
                     value={p.pos}
                     onChange={(e) => handleUpdatePlayerPos(p.id, e.target.value)}
-                    className="border border-white/10 bg-[#080809] text-slate-300 rounded-lg text-xs font-semibold py-1 px-2 focus:outline-none focus:border-indigo-500/50 cursor-pointer hover:bg-white/5 font-mono"
+                    disabled={!isAdmin}
+                    className={`border border-white/10 bg-[#080809] text-slate-300 rounded-lg text-xs font-semibold py-1 px-2 focus:outline-none focus:border-indigo-500/50 cursor-pointer hover:bg-white/5 font-mono ${!isAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     {POSITIONS.map((pos) => (
                       <option key={pos} value={pos} className="bg-[#0c0c0e] text-white">
@@ -261,7 +293,8 @@ export default function RosterManager({
                   {/* Bench Toggle button */}
                   <button
                     onClick={() => handleToggleBench(p.id)}
-                    className="p-1 px-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-slate-300 hover:text-white text-xs flex items-center gap-1 shrink-0 cursor-pointer"
+                    disabled={!isAdmin}
+                    className={`p-1 px-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-slate-300 hover:text-white text-xs flex items-center gap-1 shrink-0 cursor-pointer ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
                     title={p.status === 'bench' ? '경기 출전 명단에 복귀' : '시합 벤치에 대기'}
                   >
                     {p.status === 'bench' ? <UserCheck size={13} /> : <UserMinus size={13} />}
@@ -271,7 +304,8 @@ export default function RosterManager({
                   {/* Delete button */}
                   <button
                     onClick={() => handleRemovePlayer(p.id, p.name)}
-                    className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors shrink-0 cursor-pointer"
+                    disabled={!isAdmin}
+                    className={`p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors shrink-0 cursor-pointer ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
                     title="선수 삭제"
                   >
                     <Trash2 size={14} />
@@ -293,8 +327,12 @@ export default function RosterManager({
             <Download size={14} /> 명단 내보내기 (JSON)
           </button>
           <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 bg-[#0C0C0E] border border-white/10 hover:bg-white/5 text-slate-300 rounded-xl px-3.5 py-1.5 text-xs font-semibold scale-95 hover:scale-100 transition-all shadow-sm cursor-pointer"
+            onClick={() => {
+              if (!checkAdmin()) return;
+              fileInputRef.current?.click();
+            }}
+            disabled={!isAdmin}
+            className={`flex items-center gap-1.5 bg-[#0C0C0E] border border-white/10 hover:bg-white/5 text-slate-300 rounded-xl px-3.5 py-1.5 text-xs font-semibold scale-95 hover:scale-100 transition-all shadow-sm cursor-pointer ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             <Upload size={14} /> 명단 불러오기
           </button>
@@ -308,7 +346,8 @@ export default function RosterManager({
         </div>
         <button
           onClick={handleClearRoster}
-          className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl px-3.5 py-1.5 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border border-rose-500/20"
+          disabled={!isAdmin}
+          className={`bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl px-3.5 py-1.5 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border border-rose-500/20 ${!isAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
         >
           <Trash2 size={14} /> 전체 초기화
         </button>
