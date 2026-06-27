@@ -20,18 +20,22 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "10mb" }));
-
   // CORS middleware to support clients running on external domains (such as kminseo1203.github.io)
   app.use(cors({
     origin: (origin, callback) => {
       // Dynamically echo the request origin to satisfy credentials requirement
-      callback(null, true);
+      if (!origin) {
+        callback(null, true);
+      } else {
+        callback(null, origin);
+      }
     },
     credentials: true,
     methods: ["GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["X-Requested-With", "Content-Type", "Authorization", "Accept", "Origin"]
   }));
+
+  app.use(express.json({ limit: "10mb" }));
 
   // Shared state variables kept in-memory at the server container level
   let serverGameState: any = null;
