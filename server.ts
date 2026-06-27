@@ -29,7 +29,10 @@ async function startServer() {
 
   // CORS middleware to support clients running on external domains (such as kminseo1203.github.io)
   app.use(cors({
-    origin: true,
+    origin: (origin, callback) => {
+      // Dynamically echo the request origin to satisfy credentials requirement
+      callback(null, true);
+    },
     credentials: true,
     methods: ["GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["X-Requested-With", "Content-Type", "Authorization", "Accept", "Origin"]

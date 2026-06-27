@@ -779,8 +779,10 @@ export default function App() {
             const suggested = tempState[r.base];
             return (
               <div key={r.base} className="flex items-center justify-between py-2.5">
-                <span className="text-sm font-bold text-slate-800">{r.text}</span>
+                <label htmlFor={`runner-dest-${r.base}`} className="text-sm font-bold text-slate-800">{r.text}</label>
                 <select
+                  id={`runner-dest-${r.base}`}
+                  name={`runner-dest-${r.base}`}
                   defaultValue={suggested}
                   onChange={(e) => {
                     tempState[r.base] = parseInt(e.target.value);
@@ -922,8 +924,10 @@ export default function App() {
         <p className="text-xs text-slate-400">주자가 이동할 베이스를 입력하세요.</p>
         {activeRunners.map((b) => (
           <div key={b} className="flex items-center justify-between py-2">
-            <span className="text-sm font-bold text-slate-800">{b}루 주자</span>
+            <label htmlFor={`runner-bork-dest-${b}`} className="text-sm font-bold text-slate-800">{b}루 주자</label>
             <select
+              id={`runner-bork-dest-${b}`}
+              name={`runner-bork-dest-${b}`}
               defaultValue={tempState[b]}
               onChange={(e) => {
                 tempState[b] = parseInt(e.target.value);
@@ -1018,8 +1022,9 @@ export default function App() {
           <span className="block font-bold text-slate-700 mb-1">도루 대상 주자 선택</span>
           <div className="flex gap-2">
             {activeRunners.map((b) => (
-              <label key={b} className="flex items-center gap-1.5 bg-slate-50 border rounded-lg px-3 py-1.5 cursor-pointer hover:bg-slate-100 font-semibold text-slate-800">
+              <label key={b} htmlFor={`steal-runner-${b}`} className="flex items-center gap-1.5 bg-slate-50 border rounded-lg px-3 py-1.5 cursor-pointer hover:bg-slate-100 font-semibold text-slate-800">
                 <input
+                  id={`steal-runner-${b}`}
                   type="radio"
                   name="steal-runner"
                   defaultChecked={b === selectedRunner}
@@ -1119,9 +1124,11 @@ export default function App() {
             <span className="block font-bold text-slate-700">주자 언더플레이/진루선택</span>
             {activeRunners.map((b) => (
               <div key={b} className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 p-2 border border-slate-100 rounded-xl bg-slate-50/50">
-                <label className="flex items-center gap-1.5 font-semibold text-slate-700 cursor-pointer select-none">
+                <label htmlFor={`advance-runner-${b}`} className="flex items-center gap-1.5 font-semibold text-slate-700 cursor-pointer select-none">
                   <input
+                    id={`advance-runner-${b}`}
                     type="checkbox"
+                    name={`advance-runner-${b}`}
                     defaultChecked={advanceMap[b]}
                     onChange={(e) => {
                       advanceMap[b] = e.target.checked;
@@ -1132,6 +1139,9 @@ export default function App() {
                 </label>
                 {/* Destination */}
                 <select
+                  id={`advance-dest-${b}`}
+                  name={`advance-dest-${b}`}
+                  aria-label={`${b}루 주자 진루 목적지`}
                   defaultValue={b + 1}
                   onChange={(e) => {
                     destMap[b] = parseInt(e.target.value);
@@ -1153,9 +1163,11 @@ export default function App() {
             <span className="block font-bold text-slate-700 text-red-600">병살/추가 주자 태그아웃 지정</span>
             <div className="flex gap-2flex-wrap">
               {activeRunners.map((b) => (
-                <label key={b} className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 cursor-pointer font-bold text-red-800">
+                <label key={b} htmlFor={`double-play-runner-${b}`} className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 cursor-pointer font-bold text-red-800">
                   <input
+                    id={`double-play-runner-${b}`}
                     type="checkbox"
+                    name={`double-play-runner-${b}`}
                     defaultChecked={addtionalOutMap[b]}
                     onChange={(e) => {
                       addtionalOutMap[b] = e.target.checked;
@@ -1492,9 +1504,11 @@ ${subText}
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 font-semibold text-slate-600 cursor-pointer">
+            <label htmlFor="sync-enabled-chk" className="flex items-center gap-1.5 font-semibold text-slate-600 cursor-pointer">
               <input
+                id="sync-enabled-chk"
                 type="checkbox"
+                name="sync-enabled"
                 checked={syncEnabled}
                 onChange={(e) => setSyncEnabled(e.target.checked)}
                 className="rounded text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 border-slate-300"
@@ -1602,8 +1616,10 @@ ${subText}
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div className="w-full flex-1">
-                      <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">홈팀 명칭</label>
+                      <label htmlFor="team-a-name-input" className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">홈팀 명칭</label>
                       <input
+                        id="team-a-name-input"
+                        name="teamA"
                         type="text"
                         value={gameState.teamA}
                         onChange={(e) => updateGameState({ teamA: e.target.value })}
@@ -1612,8 +1628,10 @@ ${subText}
                     </div>
                     <span className="text-xs font-black text-slate-350 shrink-0 select-none">VS</span>
                     <div className="w-full flex-1">
-                      <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1 text-center sm:text-right">원정팀 명칭</label>
+                      <label htmlFor="team-b-name-input" className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1 text-center sm:text-right">원정팀 명칭</label>
                       <input
+                        id="team-b-name-input"
+                        name="teamB"
                         type="text"
                         value={gameState.teamB}
                         onChange={(e) => updateGameState({ teamB: e.target.value })}
@@ -1686,10 +1704,12 @@ ${subText}
                 {/* Batter & Pitcher select and details */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                    <label htmlFor="cur-batter-select" className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
                       현재 타석 타자 ({getBattingTeamName()} 공격팀)
                     </label>
                     <select
+                      id="cur-batter-select"
+                      name="curBatter"
                       value={gameState.curBatter}
                       onChange={(e) => updateGameState({ curBatter: e.target.value })}
                       className="w-full border border-slate-250 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-slate-500 font-bold text-slate-800"
@@ -1711,12 +1731,14 @@ ${subText}
                       {/* 홈팀 투수 */}
                       <div className={`p-3 rounded-xl border transition-all ${getPitchingTeamKey() === 'A' ? 'bg-indigo-50/50 border-indigo-200 ring-2 ring-indigo-500/20' : 'bg-slate-50/30 border-slate-150'}`}>
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-xs font-extrabold text-slate-700">🏠 홈투수 ({gameState.teamA})</span>
+                          <label htmlFor="cur-pitcher-a-select" className="text-xs font-extrabold text-slate-700">🏠 홈투수 ({gameState.teamA})</label>
                           {getPitchingTeamKey() === 'A' && (
                             <span className="text-[9px] font-black tracking-wide uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded-md animate-pulse">수비 (마운드)</span>
                           )}
                         </div>
                         <select
+                          id="cur-pitcher-a-select"
+                          name="curPitcherA"
                           value={gameState.curPitcherA}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1742,12 +1764,14 @@ ${subText}
                       {/* 원정팀 투수 */}
                       <div className={`p-3 rounded-xl border transition-all ${getPitchingTeamKey() === 'B' ? 'bg-indigo-50/50 border-indigo-200 ring-2 ring-indigo-500/20' : 'bg-slate-50/30 border-slate-150'}`}>
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-xs font-extrabold text-slate-700">🚌 원정투수 ({gameState.teamB})</span>
+                          <label htmlFor="cur-pitcher-b-select" className="text-xs font-extrabold text-slate-700">🚌 원정투수 ({gameState.teamB})</label>
                           {getPitchingTeamKey() === 'B' && (
                             <span className="text-[9px] font-black tracking-wide uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded-md animate-pulse">수비 (마운드)</span>
                           )}
                         </div>
                         <select
+                          id="cur-pitcher-b-select"
+                          name="curPitcherB"
                           value={gameState.curPitcherB}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -2150,11 +2174,13 @@ ${subText}
 
                 {/* Umpire text memoing screen */}
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-mono">
+                  <label htmlFor="umpire-memo-textarea" className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1 font-mono block mb-1">
                     심판 특이사항 및 그라운드 메모 (UMPIRE NOTES)
-                  </h4>
+                  </label>
                   <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
                     <textarea
+                      id="umpire-memo-textarea"
+                      name="umpireMemo"
                       placeholder="특이 판정 시위 항의 사항, 우천 대기 혹은 선수 부상 기록 등을 기입하세요..."
                       value={gameState.memo}
                       onChange={(e) => updateGameState({ memo: e.target.value })}
