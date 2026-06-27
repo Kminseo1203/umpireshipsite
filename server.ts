@@ -27,6 +27,25 @@ async function startServer() {
 
   app.use(express.json({ limit: "10mb" }));
 
+  // CORS middleware to support clients running on external domains (such as kminseo1203.github.io)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(200);
+      return;
+    }
+    next();
+  });
+
   // Shared state variables kept in-memory at the server container level
   let serverGameState: any = null;
   let serverRosters: any = null;

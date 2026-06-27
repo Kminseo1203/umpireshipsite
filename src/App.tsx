@@ -29,6 +29,16 @@ import {
 const SAVE_KEY = 'baseball_umpire_v3_react';
 const ROSTER_KEY = 'baseball_umpire_rosters_v1_react';
 
+const getApiUrl = (path: string) => {
+  const host = window.location.hostname;
+  const isLocalOrCloudRun = host === 'localhost' || 
+                            host === '127.0.0.1' || 
+                            host.endsWith('.run.app');
+  // If hosted on GitHub Pages or custom domain, route API requests to our live Cloud Run container URL
+  const base = isLocalOrCloudRun ? '' : 'https://ais-pre-2mljdcdy7iopruotoxw6gh-607464111897.asia-northeast1.run.app';
+  return `${base}${path}`;
+};
+
 export default function App() {
   // 1. Current Active Tab
   const [currentTab, setCurrentTab] = useState<TabType>('game');
@@ -124,7 +134,7 @@ export default function App() {
     try {
       isPostingRef.current = true;
       setSyncStatus('syncing');
-      const res = await fetch('/api/sync', {
+      const res = await fetch(getApiUrl('/api/sync'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -233,7 +243,7 @@ export default function App() {
 
         // Try syncing with the server first
         setSyncStatus('syncing');
-        const res = await fetch('/api/sync');
+        const res = await fetch(getApiUrl('/api/sync'));
         if (res.ok) {
           const data = await res.json();
           // If server already contains custom rosters, we pull from server.
@@ -295,7 +305,7 @@ export default function App() {
     const pollServer = async () => {
       if (!syncEnabled || isPostingRef.current) return;
       try {
-        const res = await fetch('/api/sync');
+        const res = await fetch(getApiUrl('/api/sync'));
         if (res.ok) {
           const data = await res.json();
           // Overwrite local if server's update timestamp is newer than our recorded one
@@ -357,7 +367,7 @@ export default function App() {
 
   const handleGoogleLogin = async () => {
     try {
-      const res = await fetch('/api/auth/google/url');
+      const res = await fetch(getApiUrl('/api/auth/google/url'));
       const data = await res.json();
       if (data.configured && data.url) {
         const width = 500;
@@ -1499,7 +1509,7 @@ ${subText}
                 }
                 if (window.confirm("정말로 모든 장치의 명단과 게임 데이터를 초기값으로 리셋하시겠습니까?")) {
                   try {
-                    const res = await fetch('/api/sync/reset', { method: 'POST' });
+                    const res = await fetch(getApiUrl('/api/sync/reset'), { method: 'POST' });
                     if (res.ok) {
                       const data = await res.json();
                       setGameState(data.gameState);
